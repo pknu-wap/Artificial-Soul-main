@@ -6,6 +6,6 @@
   ],
   "scripts": {
     "build": "npm run build --workspace=frontend",
-    "install": "npm install --workspace=frontend"
+    "install": "npm install --workspace=frontend --prefer-offline --no-audit --no-fund"
   }
 }
