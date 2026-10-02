@@ -1,0 +1,11 @@
+{
+  "name": "artificial-soul-root",
+  "private": true,
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=frontend",
+    "install": "npm install --workspace=frontend"
+  }
+}
