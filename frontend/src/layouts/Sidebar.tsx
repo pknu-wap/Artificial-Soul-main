@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import Image from "next/image";
 import { FlaskConical, Settings, BookOpen, ChevronDown, ChevronUp, ChevronRight, Cpu } from "lucide-react";
-import NotebookTree from "@/components/NotebookTree";
+import NotebookTree from "@/features/notebook/components/NotebookTree";
 import styles from "./Sidebar.module.css";
 
 export default function Sidebar() {

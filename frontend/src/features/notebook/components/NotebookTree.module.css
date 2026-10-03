@@ -119,6 +119,15 @@
   color: #e2e8f0;
 }
 
+.folderHeaderActive {
+  background-color: #0d1e3d;
+  color: #e2e8f0;
+}
+
+.folderHeaderActive .folderTitle {
+  color: #e2e8f0;
+}
+
 .folderLeft {
   display: flex;
   align-items: center;
@@ -133,10 +142,6 @@
 
 .folderHeader:hover .folderTitle {
   color: #e2e8f0;
-}
-
-.folderTitleActive {
-  color: #ffffff;
 }
 
 .folderRight {
@@ -183,4 +188,48 @@
 
 .chatItemActive:hover {
   background-color: #0f2f68;
+}
+
+.newFolderInputBox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background-color: #141f41;
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+
+.newFolderInput {
+  flex: 1;
+  background: transparent;
+  font-size: 13px;
+  color: #e0e9f7;
+  border: none;
+  outline: none;
+}
+
+.newFolderInput::placeholder {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.newFolderBtnGroup {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.iconBtn {
+  background: none;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.iconBtn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
 }
