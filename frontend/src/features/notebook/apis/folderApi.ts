@@ -25,3 +25,10 @@ export const createChatApi = async (folderId: string): Promise<{ folderId: strin
     },
   };
 };
+
+export const moveChatToFolderApi = async (chatId: string, targetFolderId: string): Promise<boolean> => {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  //백엔드 연동시 예시
+  // await axio.patch(`/api/chats/${chatId}`, {folderId: targetFolderId});
+  return true;
+};
