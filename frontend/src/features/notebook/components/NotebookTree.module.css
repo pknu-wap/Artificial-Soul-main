@@ -75,6 +75,7 @@
 
 .treeSection {
   flex: 1;
+  min-height: 120px;
   overflow-y: auto;
   padding: 12px 6px;
   display: flex;
@@ -109,13 +110,22 @@
   color: #94a3b8;
   font-size: 14px;
   user-select: none;
+  position: relative;
   transition:
     background-color 0.15s,
     color 0.15s;
 }
-
 .folderHeader:hover {
   background-color: #0d1e3d;
+  color: #e2e8f0;
+}
+
+.folderHeaderActive {
+  background-color: #0d1e3d;
+  color: #e2e8f0;
+}
+
+.folderHeaderActive .folderTitle {
   color: #e2e8f0;
 }
 
@@ -135,16 +145,18 @@
   color: #e2e8f0;
 }
 
-.folderTitleActive {
-  color: #ffffff;
-}
-
 .folderRight {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
   color: #64748b;
+}
+
+.folderHeaderDropHover {
+  background-color: #163266 !important;
+  outline: 1px dashed #38bdf8;
+  outline-offset: -1px;
 }
 
 .chatList {
@@ -166,9 +178,53 @@
   color: #94a3b8;
   cursor: pointer;
   user-select: none;
+  position: relative;
   transition:
     background-color 0.15s,
     color 0.15s;
+}
+
+.chatItemLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.chatItemLeft span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moreActionBtn {
+  opacity: 0;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition:
+    opacity 0.15s,
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.chatItem:hover .moreActionBtn,
+.folderHeader:hover .moreActionBtn,
+.moreActionBtnActive {
+  opacity: 1;
+}
+
+.moreActionBtn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #bec5c7;
 }
 
 .chatItem:hover {
@@ -176,11 +232,111 @@
   color: #e2e8f0;
 }
 
+.actionDropdown {
+  position: absolute;
+  top: calc(100% - 4px);
+  right: 6px;
+  background-color: #1e2d50;
+  border-radius: 8px;
+  padding: 4px;
+  z-index: 200;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  min-width: 95px;
+}
+.actionDropdownUp {
+  top: auto !important;
+  bottom: calc(100% - 4px) !important;
+}
+
+.actionMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #cbd5e1;
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 4px;
+  text-align: left;
+  transition: background-color 0.15s;
+}
+
+.actionMenuItem:hover {
+  color: #ffffff;
+}
+
+.actionMenuDelete:hover {
+  color: #ffffff;
+}
+
+.inlineEditInput {
+  background: #141f41;
+  border: 1px solid #38bdf8;
+  border-radius: 4px;
+  color: #e0e9f7;
+  font-size: 13px;
+  padding: 2px 6px;
+  outline: none;
+  width: 100%;
+}
+
 .chatItemActive {
   background-color: #0d2757;
   font-weight: 500;
 }
 
+.chatItem:active {
+  cursor: grabbing;
+}
+
 .chatItemActive:hover {
   background-color: #0f2f68;
+}
+
+.newFolderInputBox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background-color: #141f41;
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+
+.newFolderInput {
+  flex: 1;
+  background: transparent;
+  font-size: 13px;
+  color: #e0e9f7;
+  border: none;
+  outline: none;
+}
+
+.newFolderInput::placeholder {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.newFolderBtnGroup {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.iconBtn {
+  background: none;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.iconBtn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
 }
