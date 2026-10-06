@@ -2,7 +2,7 @@
 
 Artificial Soul은 대학 홈페이지의 학사일정·학사규정·장학금 등 TXT 지식 데이터를 검색하고, 검색된 근거로 기존 LLM이 답변하는 **RAG 기반 대학 정보 AI Assistant**입니다. 사용자 입력은 텍스트이며, 최종 응답은 답변과 출처를 제공합니다.
 
-현재 백엔드는 팀 공통 개발환경과 인프라 연결 확인을 제공합니다. MVP에 사용할 User·Chat/Message·Document 입력 처리·RAG의 패키지와 파일 위치를 준비했으며, 해당 업무 기능과 LLM 호출은 후속 스프린트에서 구현합니다.
+현재 백엔드는 팀 공통 개발환경, 인프라 연결 확인, **TXT → Document/Chunk 준비 함수와 Qdrant 저장 기반**을 제공합니다. Chunking은 NLP 담당의 함수를 주입하고, Qdrant 저장에는 호출자가 만든 실제 임베딩 벡터를 전달합니다. User·Chat/Message 업무 기능과 실제 Embedding·Retrieval·LLM 연결은 후속 스프린트에서 구현합니다.
 
 ## 기술과 실행 구조
 
@@ -87,10 +87,15 @@ PowerShell에서는 `Copy-Item .env.example .env`를 사용합니다. 기존 `.e
 | `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5432/artificial_soul` | FastAPI의 비동기 PostgreSQL 연결 주소 |
 | `QDRANT_URL` | `http://localhost:6333` | FastAPI의 Qdrant HTTP 주소 |
 | `HEALTH_CHECK_TIMEOUT_SECONDS` | `3` | 서비스별 readiness 확인 제한 시간 |
+| `QDRANT_COLLECTION_NAME` | `artificial_soul_knowledge` | 명시적인 적재 호출에서 사용할 컬렉션 이름 |
+| `QDRANT_VECTOR_SIZE` | 미설정 | 선택한 Embedding 모델의 실제 벡터 차원; 컬렉션 준비·적재 때 필요 |
+| `QDRANT_DISTANCE` | `Cosine` | 벡터 거리 함수; `Cosine`, `Dot`, `Euclid`, `Manhattan` 지원 |
 
 `DATABASE_URL`은 반드시 `postgresql+asyncpg://`로 시작해야 합니다. DB명·계정·비밀번호를 변경하면 `POSTGRES_*`와 `DATABASE_URL`을 함께 수정하세요. URL에 들어가는 비밀번호에 특수문자가 있으면 URL 인코딩해야 합니다.
 
 설정은 작업 디렉터리에 관계없이 이 백엔드의 `.env`를 읽으며, 운영체제 환경변수가 `.env`보다 우선합니다. `.env.example`의 계정은 로컬 개발용 예시이며, 실제 비밀번호·Secret은 `.env`나 실행 환경에만 둡니다. `.env`는 Git과 Docker 빌드 컨텍스트에서 제외됩니다.
+
+Embedding 모델이 정해지기 전에는 `QDRANT_VECTOR_SIZE`를 설정하지 않습니다. 빈 값인 `QDRANT_VECTOR_SIZE=`도 넣지 마세요. 이 값 없이도 TXT 준비, FastAPI 시작과 헬스체크가 가능합니다. 컬렉션 준비·적재를 호출할 때에는 모델의 실제 차원을 양의 정수로 지정해야 합니다. 컬렉션은 앱 시작이나 헬스체크에서 생성하지 않습니다.
 
 ### 4. PostgreSQL과 Qdrant 실행
 
@@ -157,6 +162,25 @@ python -m pip check
 
 검증하는 동작은 liveness, readiness 정상·서비스별 실패·동시 실패·시간초과, Swagger/OpenAPI, 종료 시 리소스 정리, 일부 리소스만 생성된 시작 실패 시 정리입니다. HTTPX `ASGITransport`는 lifespan을 자동 실행하지 않으므로 테스트에서 lifespan을 명시적으로 실행합니다.
 
+Document 테스트는 UTF-8/BOM, 잘못된 TXT 입력, 필드와 JSON metadata 검증, splitter 주입, ID 재현성, 외부 연결 없는 ingestion을 확인합니다. Qdrant 모의 테스트는 컬렉션 생성·재사용·구성 불일치·연결 실패, Point 매핑, 전체 Vector 입력 검증, upsert 완료 여부를 확인합니다.
+
+실제 Qdrant 검증은 기본 테스트에서 건너뜁니다. Qdrant를 실행한 뒤 macOS/Linux에서 명시적으로 실행할 수 있습니다.
+
+```bash
+RUN_QDRANT_INTEGRATION=1 QDRANT_URL=http://127.0.0.1:6333 python -m pytest -q -m integration
+```
+
+PowerShell에서는 다음과 같이 환경변수를 설정합니다.
+
+```powershell
+$env:RUN_QDRANT_INTEGRATION = "1"
+$env:QDRANT_URL = "http://127.0.0.1:6333"
+python -m pytest -q -m integration
+Remove-Item Env:RUN_QDRANT_INTEGRATION
+```
+
+이 테스트는 `.env`나 PostgreSQL 없이 실행합니다. 고유한 `test_txt_ingestion_<UUID>` 컬렉션과 테스트용 2차원 벡터로 생성 → 적재 → 재적재 → Point 수·내용 조회를 확인합니다. 테스트가 확보한 이름의 컬렉션만 `finally`에서 삭제하고 클라이언트를 종료합니다. 테스트 벡터는 실제 Embedding 결과가 아닙니다.
+
 ## 프로젝트 구조와 파일 역할
 
 ```text
@@ -177,6 +201,7 @@ backend/
 │   │   ├── __init__.py
 │   │   ├── loader.py
 │   │   ├── chunker.py
+│   │   ├── ingestion.py
 │   │   └── schema.py
 │   ├── rag/
 │   │   ├── __init__.py
@@ -196,8 +221,11 @@ backend/
 │       └── llm.py
 ├── tests/
 │   ├── conftest.py
+│   ├── test_document.py
 │   ├── test_health.py
-│   └── test_lifespan.py
+│   ├── test_lifespan.py
+│   ├── test_qdrant.py
+│   └── test_qdrant_integration.py
 ├── .env.example
 ├── .gitignore
 ├── .dockerignore
@@ -209,7 +237,7 @@ backend/
 └── README.md
 ```
 
-각 Python 패키지에는 `__init__.py`를 둡니다. User는 패키지만 준비했고, Chat·Document·RAG와 `clients/llm.py`는 역할 설명만 담은 빈 모듈입니다. 현재 실행 코드에 연결된 업무 API나 모델·파이프라인은 없습니다. 가상환경, 로컬 Python 설치, 실제 `.env`는 Git에 포함되지 않습니다.
+각 Python 패키지에는 `__init__.py`를 둡니다. Document는 내부 TXT 준비 기능을 제공하고, Qdrant는 연결 확인과 명시적인 컬렉션 준비·Chunk 저장 함수를 제공합니다. User는 패키지만 준비했고, Chat·RAG와 `clients/llm.py`는 역할 설명만 담은 빈 모듈입니다. HTTP API는 기존 Health API만 제공하며 Document 업로드·CRUD API는 추가하지 않았습니다. 가상환경, 로컬 Python 설치, 실제 `.env`는 Git에 포함되지 않습니다.
 
 | 파일 또는 디렉터리 | 역할 |
 | --- | --- |
@@ -217,15 +245,18 @@ backend/
 | `app/health/router.py` | HTTP 헬스체크와 인프라 상태 응답 |
 | `app/core/config.py` | 환경변수 로딩, 설정 타입·필수값 검증 |
 | `app/core/database.py` | Async Engine, 세션 생성기, 요청별 세션, `SELECT 1` 확인 |
-| `app/clients/qdrant.py` | AsyncQdrantClient 생성과 읽기 전용 연결 확인 |
+| `app/clients/qdrant.py` | AsyncQdrantClient 생성·연결 확인, 명시적인 컬렉션 준비와 Chunk/Vector 저장 |
 | `app/user` | 향후 사용자 정보 기능의 개발 위치 |
 | `app/chat/router.py`, `service.py` | 향후 Chat/Message HTTP·SSE 응답과 대화 처리 |
 | `app/chat/repository.py`, `model.py`, `schema.py` | 향후 Chat/Message 저장, ORM 모델, 요청·응답 DTO |
-| `app/document/loader.py`, `chunker.py`, `schema.py` | 향후 팀이 준비한 TXT 로딩, 텍스트 분할, Document/Chunk 구조 |
+| `app/document/schema.py` | Pydantic Document·Chunk·IngestionResult와 JSON metadata 검증 |
+| `app/document/loader.py`, `chunker.py`, `ingestion.py` | UTF-8 TXT 로딩, 외부 splitter 연결, Document/Chunk 준비 진입점 |
 | `app/rag/embedding.py`, `retrieval.py`, `service.py` | 향후 임베딩, 관련 Chunk 검색, Context와 답변·출처 구성 |
 | `app/clients/llm.py` | 향후 LLM 연결 코드의 위치; 현재 외부 호출 없음 |
 | `tests/conftest.py` | 외부 환경과 분리한 설정·모의 연결·HTTPX fixture |
 | `tests/test_health.py`, `tests/test_lifespan.py` | API 응답과 리소스 수명주기 검증 |
+| `tests/test_document.py`, `tests/test_qdrant.py` | 외부 환경 없이 TXT 준비와 Qdrant 저장 계약 검증 |
+| `tests/test_qdrant_integration.py` | 명시적으로 실행하는 실제 Qdrant 적재·재적재·정리 검증 |
 | `.env.example` | 팀원이 복사할 개발용 설정 예시 |
 | `.gitignore`, `.dockerignore` | 로컬 설정·가상환경·캐시를 Git·이미지에서 제외 |
 | `.python-version`, `requirements.txt` | Python 버전과 검증할 패키지 버전 지정 |
@@ -262,6 +293,118 @@ TXT → document.loader → document.chunker → rag.embedding → Qdrant
 Notebook은 Chat 목록을 보여주는 UI 명칭으로 사용할 수 있으며, 현재 별도 백엔드 패키지나 테이블을 두지 않습니다. Settings는 서버 저장이 필요한 사용자 설정이 생길 때 User 기능에서 확장하고, About Us는 프론트엔드 정적 페이지로 처리합니다.
 
 서버 환경변수와 DB 연결은 공통 `core`에서 관리합니다. `core/config.py`의 `Settings` 클래스는 `DATABASE_URL`·`QDRANT_URL` 등 실행 환경설정이며 사용자 설정 도메인이 아닙니다. Health Check는 별도 `health` 모듈에서 연결 확인 함수를 호출합니다.
+
+## TXT Ingestion 사용 방법
+
+TXT 준비는 HTTP API가 아닌 내부 Python 함수입니다. 실제 Embedding 호출과 Qdrant 저장은 별도로 연결합니다.
+
+```text
+prepare_txt_ingestion(path, source=..., splitter=...)
+  ├── load_txt → Document
+  └── chunk_document → list[Chunk]
+          ↓
+    IngestionResult(document, chunks)
+          ↓ 후속 Embedding 구현
+    실제 Vector 목록 → ensure_collection → upsert_chunks
+```
+
+### Document·Chunk 구조
+
+| 필드 | Document | Chunk | 규약 |
+| --- | --- | --- | --- |
+| `id` | UUID | UUID | Document는 source 기반 UUID5, Chunk는 Document UUID와 인덱스 기반 UUID5 |
+| `document_id` | — | UUID | Chunk의 원본 Document 식별자 |
+| `text` | 원문 | splitter가 반환한 부분 문자열 | 공백뿐인 값은 허용하지 않으며 내용과 줄바꿈을 보존 |
+| `chunk_index` | — | 0부터 시작하는 정수 | 공백 Chunk를 제외한 후 순서대로 부여 |
+| `source` | 문자열 | 동일 출처 | 호출자가 지정하는 안정적인 출처 식별자 |
+| `category` | 문자열 또는 None | 원본 값 전달 | 예: `academic`, `scholarship` |
+| `metadata` | JSON 객체 | 원본 값 복사 | 문자열 키, JSON 값만 사용; datetime·set·NaN·Infinity 등은 거부 |
+
+`IngestionResult`는 `document`와 비어 있지 않은 `chunks` 목록을 담습니다. JSON으로 출력하면 UUID는 문자열로 변환됩니다. metadata 기본값과 중첩 객체는 문서·Chunk끼리 공유하지 않습니다.
+
+source에는 `academic/calendar.txt` 같은 상대 경로나 원문 URL을 지정합니다. 로컬 파일의 절대 경로가 자동으로 들어가지 않습니다. source가 같으면 파일 위치나 내용이 달라져도 같은 Document ID이므로, 서로 다른 원문에는 서로 다른 source를 부여하세요.
+
+### NLP 담당과의 splitter 규약
+
+`TextSplitter` 타입은 `Callable[[str], Sequence[str]]`입니다. 함수는 원문 문자열을 받아 **순서가 있는 문자열 목록**을 반환합니다. 토큰·문단 분할, overlap 등 전략은 NLP 담당이 결정합니다. Backend는 전략에 관여하지 않고 결과에 ID와 출처를 붙입니다.
+
+- 빈 문자열과 공백뿐인 문자열은 제외합니다.
+- 유효한 문자열이 하나도 없으면 `ValueError`입니다.
+- 문자열 하나, bytes, generator, 문자열 이외의 항목을 반환하면 `TypeError`입니다.
+- splitter 자체에서 발생한 오류는 호출자에게 전달합니다.
+- 기본 splitter는 제공하지 않으므로 호출자가 반드시 지정해야 합니다.
+
+### TXT → IngestionResult 예시
+
+가상환경의 Python에서 아래 코드를 실행합니다. 이 예시는 임시 TXT를 만들기 때문에 기존 지식 파일이나 `.env`, Docker가 필요 없습니다. `str.splitlines`는 연결 방법을 보여주는 예시이며 실제 Chunking 전략을 확정한 것이 아닙니다.
+
+```python
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from app.document.ingestion import prepare_txt_ingestion
+
+with TemporaryDirectory() as directory:
+    path = Path(directory) / "academic.txt"
+    path.write_text("등록 일정 안내\n장학금 신청 안내\n", encoding="utf-8")
+    result = prepare_txt_ingestion(
+        path,
+        source="academic/calendar.txt",
+        splitter=str.splitlines,
+        category="academic",
+        metadata={"year": 2026, "tags": ["학사"]},
+    )
+    print(result.model_dump_json(indent=2))
+```
+
+팀이 준비한 실제 TXT를 사용할 때에는 `path`와 `source`를 해당 파일·출처로 바꾸고 NLP splitter 함수를 전달합니다. Loader는 UTF-8과 UTF-8 BOM, `.txt`/`.TXT`를 지원합니다. 없는 파일은 `FileNotFoundError`, 디렉터리는 `IsADirectoryError`, 잘못된 인코딩은 `UnicodeDecodeError`입니다. 일반 파일이 아니거나 확장자가 다르거나 내용이 비어 있으면 `ValueError`, 데이터 필드가 잘못되면 Pydantic `ValidationError`입니다.
+
+### 실제 Vector를 Qdrant에 저장하기
+
+Qdrant에는 TXT 파일 대신 Chunk의 **UUID + Vector + Payload**를 저장합니다. payload 필드는 `document_id`, `chunk_index`, `text`, `source`, `category`, `metadata`입니다. Document 전체 원문이나 로컬 파일 경로를 추가로 저장하지 않습니다.
+
+다음 함수는 임베딩 단계에서 이미 생성한 Vector를 받는 사용 예시입니다. Vector 목록은 `prepared.chunks`와 같은 순서여야 합니다. `client`에는 FastAPI lifespan에서 만든 `app.state.qdrant_client`, `settings`에는 `app.state.settings`를 전달할 수 있습니다.
+
+```python
+from collections.abc import Sequence
+
+from qdrant_client import AsyncQdrantClient
+
+from app.clients.qdrant import ensure_collection, upsert_chunks
+from app.core.config import Settings
+from app.document.schema import IngestionResult
+
+
+async def store_prepared_chunks(
+    client: AsyncQdrantClient,
+    settings: Settings,
+    prepared: IngestionResult,
+    vectors: Sequence[Sequence[float]],
+) -> int:
+    await ensure_collection(
+        client,
+        collection_name=settings.qdrant_collection_name,
+        vector_size=settings.qdrant_vector_size,
+        distance=settings.qdrant_distance,
+    )
+    return await upsert_chunks(
+        client,
+        prepared.chunks,
+        vectors,
+        collection_name=settings.qdrant_collection_name,
+        vector_size=settings.qdrant_vector_size,
+    )
+```
+
+Embedding 모델을 선택한 뒤 `.env`에 `QDRANT_VECTOR_SIZE`를 모델의 실제 출력 차원으로 설정하고, 모델에 맞는 `QDRANT_DISTANCE`를 선택하세요. 예시용 차원을 운영 설정으로 사용하지 않습니다. 기존 컬렉션의 차원·거리 함수가 다르거나 named/sparse/multivector 구성이면 컬렉션 준비 함수가 `ValueError`를 내며 기존 데이터를 삭제·재생성하지 않습니다. 연결 오류도 그대로 전달합니다.
+
+`upsert_chunks`는 전체 입력의 개수·차원·유한한 실수 여부를 검증한 뒤 한 번의 upsert를 실행합니다. bool, 문자열, NaN·Infinity는 벡터 성분으로 허용하지 않습니다. 두 목록이 모두 비어 있으면 외부 요청 없이 0을 반환합니다. `wait=True`로 적용 완료를 기다리고, 완료된 상태일 때 처리한 Chunk 수를 반환합니다. 반환값은 새로 늘어난 Point 수가 아닙니다. 이 함수들은 전달받은 클라이언트를 종료하지 않습니다.
+
+### 현재 제한과 후속 연결
+
+같은 source와 같은 Chunk 순서로 재적재하면 동일 UUID의 Point가 갱신되므로 중복 Point가 늘어나지 않습니다. 다만 원문 변경·splitter 변경으로 Chunk 수가 줄어들면 이전의 뒤쪽 Point가 남습니다. source 변경도 별도 Document로 처리합니다. **문서 교체 시 잔여 Point 정리, 여러 배치 처리·재시도·병렬화는 아직 제공하지 않습니다.**
+
+다음 단계는 NLP splitter 연결, 실제 Embedding 모델 연결, 재색인 정책 결정, Retrieval 구현입니다. PostgreSQL Document 테이블, 업로드 API, Document CRUD, 모델 다운로드·유료 API 호출은 추가하지 않았습니다.
 
 ## Spring 개발자 관점
 
@@ -338,7 +481,7 @@ docker run --rm --name artificial-soul-api \
 
 ## 다음 단계
 
-첨부된 6주 스프린트 방향에 따라 다음 순서로 개발합니다. 아래 항목은 후속 작업이며 이번 패키지 단순화에서 구현한 기능은 아닙니다.
+첨부된 6주 스프린트 방향에 따라 다음 순서로 개발합니다. 1주차 개발환경과 2주차 Document/Chunk 준비·Qdrant 저장 기반은 구현했으며, 2주차 splitter의 실제 전략과 3주차 이후 AI·업무 기능은 후속 연결 대상입니다.
 
 | 주차 | Backend 개발 목표 |
 | --- | --- |

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from pydantic import AnyHttpUrl, Field, PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from qdrant_client.models import Distance
 
 
 class Settings(BaseSettings):
@@ -17,6 +18,18 @@ class Settings(BaseSettings):
 
     database_url: PostgresDsn = Field(validation_alias="DATABASE_URL")
     qdrant_url: AnyHttpUrl = Field(validation_alias="QDRANT_URL")
+    qdrant_collection_name: str = Field(
+        default="artificial_soul_knowledge",
+        min_length=1,
+        validation_alias="QDRANT_COLLECTION_NAME",
+    )
+    # A model has not been selected. Health/lifespan do not require this value.
+    qdrant_vector_size: int | None = Field(
+        default=None, gt=0, validation_alias="QDRANT_VECTOR_SIZE"
+    )
+    qdrant_distance: Distance = Field(
+        default=Distance.COSINE, validation_alias="QDRANT_DISTANCE"
+    )
     health_check_timeout_seconds: float = Field(
         default=3.0, gt=0, validation_alias="HEALTH_CHECK_TIMEOUT_SECONDS"
     )
