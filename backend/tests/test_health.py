@@ -15,6 +15,9 @@ async def test_health_does_not_check_infrastructure(infrastructure_client):
     engine.connect.assert_not_called()
     connection.execute.assert_not_awaited()
     qdrant.get_collections.assert_not_awaited()
+    qdrant.collection_exists.assert_not_awaited()
+    qdrant.create_collection.assert_not_awaited()
+    qdrant.upsert.assert_not_awaited()
 
 
 async def test_health_with_real_clients_without_infrastructure(settings):

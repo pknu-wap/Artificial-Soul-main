@@ -20,6 +20,9 @@ def settings() -> Settings:
         DATABASE_URL="postgresql+asyncpg://test:test@127.0.0.1:1/test",
         QDRANT_URL="http://127.0.0.1:1",
         HEALTH_CHECK_TIMEOUT_SECONDS=0.05,
+        QDRANT_COLLECTION_NAME="test_knowledge",
+        QDRANT_VECTOR_SIZE=None,
+        QDRANT_DISTANCE="Cosine",
     )
 
 
