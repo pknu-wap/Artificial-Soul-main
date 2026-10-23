@@ -96,4 +96,4 @@ async def test_swagger_and_openapi(infrastructure_client):
         "title": "Artificial Soul API",
         "version": "0.1.0",
     }
-    assert set(schema.json()["paths"]) == {"/health", "/health/ready"}
+    assert set(schema.json()["paths"]) == {"/health", "/health/ready", "/api/rag/retrieve"}

@@ -2,7 +2,7 @@
 
 Artificial Soul은 대학 홈페이지의 학사일정·학사규정·장학금 등 TXT 지식 데이터를 검색하고, 검색된 근거로 기존 LLM이 답변하는 **RAG 기반 대학 정보 AI Assistant**입니다. 사용자 입력은 텍스트이며, 최종 응답은 답변과 출처를 제공합니다.
 
-현재 백엔드는 팀 공통 개발환경, 인프라 연결 확인, **TXT → Document/Chunk 준비 함수와 Qdrant 저장 기반**을 제공합니다. Chunking은 NLP 담당의 함수를 주입하고, Qdrant 저장에는 호출자가 만든 실제 임베딩 벡터를 전달합니다. User·Chat/Message 업무 기능과 실제 Embedding·Retrieval·LLM 연결은 후속 스프린트에서 구현합니다.
+현재 백엔드는 개발환경·Health API와 **TXT → Document/Chunk → 실제 E5 Embedding → Qdrant 적재 → 질문 Top-K 검색 API**를 제공합니다. Chunking은 NLP 담당의 함수를 주입하며, 초기 Embedding은 PyTorch·Hugging Face Transformers로 실행하는 `intfloat/multilingual-e5-small`입니다. User·Chat/Message 저장·JWT·SSE·LLM 답변 생성은 후속 구현 대상입니다. 검색 API는 **인증 전의 로컬 개발·프론트 연동 검증용**이며 운영에 공개하지 않습니다.
 
 ## 기술과 실행 구조
 
@@ -13,6 +13,7 @@ Artificial Soul은 대학 홈페이지의 학사일정·학사규정·장학금 
 | Vector DB | Qdrant 1.19.1, qdrant-client 1.19.1, AsyncQdrantClient |
 | Infrastructure | Docker, Docker Compose, named volumes |
 | Testing | pytest, pytest-asyncio, httpx |
+| Embedding | PyTorch, Hugging Face Transformers, multilingual-e5-small, CPU |
 
 ```text
 Host
@@ -87,15 +88,21 @@ PowerShell에서는 `Copy-Item .env.example .env`를 사용합니다. 기존 `.e
 | `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5432/artificial_soul` | FastAPI의 비동기 PostgreSQL 연결 주소 |
 | `QDRANT_URL` | `http://localhost:6333` | FastAPI의 Qdrant HTTP 주소 |
 | `HEALTH_CHECK_TIMEOUT_SECONDS` | `3` | 서비스별 readiness 확인 제한 시간 |
-| `QDRANT_COLLECTION_NAME` | `artificial_soul_knowledge` | 명시적인 적재 호출에서 사용할 컬렉션 이름 |
-| `QDRANT_VECTOR_SIZE` | 미설정 | 선택한 Embedding 모델의 실제 벡터 차원; 컬렉션 준비·적재 때 필요 |
+| `QDRANT_COLLECTION_NAME` | `artificial_soul_e5_small_v1` | E5 전용 적재·검색 컬렉션; 기존 `.env`는 직접 변경 필요 |
+| `QDRANT_VECTOR_SIZE` | `384` | E5 실제 차원; Settings 기본값은 None이며 검색·적재 시 일치 필수 |
 | `QDRANT_DISTANCE` | `Cosine` | 벡터 거리 함수; `Cosine`, `Dot`, `Euclid`, `Manhattan` 지원 |
+| `QDRANT_REQUEST_TIMEOUT_SECONDS` | `10` | Qdrant 클라이언트 요청 제한; Health 확인 제한과 독립 |
+| `RETRIEVAL_TIMEOUT_SECONDS` | `30` | 질문 임베딩과 검색의 전체 제한 |
+| `EMBEDDING_MODEL_ID` | `intfloat/multilingual-e5-small` | E5 provider가 지원하는 기준 모델 |
+| `EMBEDDING_MODEL_REVISION` | `614241f622f53c4eeff9890bdc4f31cfecc418b3` | tokenizer·weights에 동일하게 적용하는 고정 리비전 |
+| `EMBEDDING_CACHE_DIR` | `.cache/huggingface` | backend 기준 캐시 경로; 절대 경로도 지원 |
+| `EMBEDDING_BATCH_SIZE` | `32` | 문서 임베딩 batch 크기, 1~128 |
 
 `DATABASE_URL`은 반드시 `postgresql+asyncpg://`로 시작해야 합니다. DB명·계정·비밀번호를 변경하면 `POSTGRES_*`와 `DATABASE_URL`을 함께 수정하세요. URL에 들어가는 비밀번호에 특수문자가 있으면 URL 인코딩해야 합니다.
 
 설정은 작업 디렉터리에 관계없이 이 백엔드의 `.env`를 읽으며, 운영체제 환경변수가 `.env`보다 우선합니다. `.env.example`의 계정은 로컬 개발용 예시이며, 실제 비밀번호·Secret은 `.env`나 실행 환경에만 둡니다. `.env`는 Git과 Docker 빌드 컨텍스트에서 제외됩니다.
 
-Embedding 모델이 정해지기 전에는 `QDRANT_VECTOR_SIZE`를 설정하지 않습니다. 빈 값인 `QDRANT_VECTOR_SIZE=`도 넣지 마세요. 이 값 없이도 TXT 준비, FastAPI 시작과 헬스체크가 가능합니다. 컬렉션 준비·적재를 호출할 때에는 모델의 실제 차원을 양의 정수로 지정해야 합니다. 컬렉션은 앱 시작이나 헬스체크에서 생성하지 않습니다.
+기존 `.env`는 새 예시로 자동 갱신되지 않습니다. 3주차 검색·적재에는 `QDRANT_VECTOR_SIZE=384`, `QDRANT_DISTANCE=Cosine`과 E5 전용 컬렉션을 설정하세요. 빈 `QDRANT_VECTOR_SIZE=`는 허용하지 않습니다. 이 설정을 생략하거나 모델 파일이 없어도 TXT 준비·FastAPI 시작·Health는 동작하지만 검색·적재는 준비 상태를 확인합니다. 앱 시작과 Health에서 컬렉션을 생성하거나 모델을 다운로드·로드하지 않습니다.
 
 ### 4. PostgreSQL과 Qdrant 실행
 
@@ -147,7 +154,7 @@ curl -i http://127.0.0.1:8000/health/ready
 - Qdrant 자체 준비 상태: `curl -i http://127.0.0.1:6333/readyz`
 - PostgreSQL 자체 연결: `docker compose exec postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'`
 
-Swagger의 `Try it out`으로 두 API를 호출할 수 있습니다.
+Swagger의 `Try it out`으로 Health API와 아래에서 설명하는 `/api/rag/retrieve`를 호출할 수 있습니다. 검색 API의 모델 준비·적재 절차는 별도입니다.
 
 ## 테스트
 
@@ -206,8 +213,13 @@ backend/
 │   ├── rag/
 │   │   ├── __init__.py
 │   │   ├── embedding.py
+│   │   ├── indexing.py
 │   │   ├── retrieval.py
-│   │   └── service.py
+│   │   ├── service.py
+│   │   ├── router.py
+│   │   ├── schema.py
+│   │   ├── errors.py
+│   │   └── cli.py
 │   ├── health/
 │   │   ├── __init__.py
 │   │   └── router.py
@@ -237,7 +249,7 @@ backend/
 └── README.md
 ```
 
-각 Python 패키지에는 `__init__.py`를 둡니다. Document는 내부 TXT 준비 기능을 제공하고, Qdrant는 연결 확인과 명시적인 컬렉션 준비·Chunk 저장 함수를 제공합니다. User는 패키지만 준비했고, Chat·RAG와 `clients/llm.py`는 역할 설명만 담은 빈 모듈입니다. HTTP API는 기존 Health API만 제공하며 Document 업로드·CRUD API는 추가하지 않았습니다. 가상환경, 로컬 Python 설치, 실제 `.env`는 Git에 포함되지 않습니다.
+Document는 내부 TXT 준비 기능을 제공하고, Qdrant는 연결 확인·컬렉션 준비·Chunk 저장을 담당합니다. RAG에는 실제 E5 임베딩·명시적 적재·검색 서비스·HTTP DTO/Router·CLI를 구현했습니다. User·Chat과 `clients/llm.py`는 후속 구현 위치입니다. HTTP API는 Health 2개와 검색 1개이며 Document 업로드·CRUD API는 제공하지 않습니다. 실제 `.env`·가상환경·모델 캐시는 Git·이미지에서 제외됩니다.
 
 | 파일 또는 디렉터리 | 역할 |
 | --- | --- |
@@ -251,12 +263,18 @@ backend/
 | `app/chat/repository.py`, `model.py`, `schema.py` | 향후 Chat/Message 저장, ORM 모델, 요청·응답 DTO |
 | `app/document/schema.py` | Pydantic Document·Chunk·IngestionResult와 JSON metadata 검증 |
 | `app/document/loader.py`, `chunker.py`, `ingestion.py` | UTF-8 TXT 로딩, 외부 splitter 연결, Document/Chunk 준비 진입점 |
-| `app/rag/embedding.py`, `retrieval.py`, `service.py` | 향후 임베딩, 관련 Chunk 검색, Context와 답변·출처 구성 |
+| `app/rag/embedding.py` | 명시적 모델 다운로드, 캐시 전용 지연 로드, E5 CPU 추론·정규화 |
+| `app/rag/indexing.py` | 전체 임베딩 검증, 모델 식별 정보 확인, 기존 Qdrant 적재 연결 |
+| `app/rag/retrieval.py`, `service.py` | 모델·컬렉션 검증, 질문 임베딩·읽기 전용 Top-K 검색 |
+| `app/rag/router.py`, `schema.py`, `errors.py` | 개발용 검색 HTTP 계약과 안전한 오류 응답 |
+| `app/rag/cli.py` | 모델 준비와 수동 TXT 적재 명령 |
 | `app/clients/llm.py` | 향후 LLM 연결 코드의 위치; 현재 외부 호출 없음 |
 | `tests/conftest.py` | 외부 환경과 분리한 설정·모의 연결·HTTPX fixture |
 | `tests/test_health.py`, `tests/test_lifespan.py` | API 응답과 리소스 수명주기 검증 |
 | `tests/test_document.py`, `tests/test_qdrant.py` | 외부 환경 없이 TXT 준비와 Qdrant 저장 계약 검증 |
 | `tests/test_qdrant_integration.py` | 명시적으로 실행하는 실제 Qdrant 적재·재적재·정리 검증 |
+| `tests/test_embedding.py`, `test_indexing.py`, `test_retrieval_api.py`, `test_rag_cli.py` | 다운로드·인프라 없는 임베딩·적재·검색·CLI 계약 검증 |
+| `tests/test_rag_integration.py` | 실제 E5와 Qdrant를 함께 사용하는 명시적 통합 검증 |
 | `.env.example` | 팀원이 복사할 개발용 설정 예시 |
 | `.gitignore`, `.dockerignore` | 로컬 설정·가상환경·캐시를 Git·이미지에서 제외 |
 | `.python-version`, `requirements.txt` | Python 버전과 검증할 패키지 버전 지정 |
@@ -288,7 +306,7 @@ TXT → document.loader → document.chunker → rag.embedding → Qdrant
 
 `document`는 RAG 입력 데이터를 다루는 패키지입니다. MVP에서는 팀이 준비한 TXT를 미리 인덱싱하고, 사용자 파일 업로드·Document CRUD API·문서 상태/버전 관리용 도메인을 만들지 않습니다. Chunking 방식은 NLP 담당이 실험·결정하고 Backend가 실제 서비스 흐름에 통합합니다. Qdrant에는 파일 자체가 아닌 Chunk의 Vector와 `text`, `source`, `category` 등의 Payload를 저장합니다.
 
-`rag/service.py`는 Retrieval 결과로 Context를 구성하고 LLM 답변과 출처를 처리할 위치입니다. 외부 연결 코드는 `clients/qdrant.py`, `clients/llm.py`에 둡니다. 사용할 Embedding 모델·LLM 제공자와 구체적인 데이터 구조는 해당 기능을 개발할 때 정합니다.
+`rag/service.py`는 현재 질문 임베딩과 관련 Chunk 검색을 조율합니다. Context 구성·LLM 답변은 4주차 후속 기능입니다. Qdrant 연결은 `clients/qdrant.py`, E5 모델 처리는 `rag/embedding.py`에 두며, LLM 제공자는 아직 결정하지 않았습니다.
 
 Notebook은 Chat 목록을 보여주는 UI 명칭으로 사용할 수 있으며, 현재 별도 백엔드 패키지나 테이블을 두지 않습니다. Settings는 서버 저장이 필요한 사용자 설정이 생길 때 User 기능에서 확장하고, About Us는 프론트엔드 정적 페이지로 처리합니다.
 
@@ -296,7 +314,7 @@ Notebook은 Chat 목록을 보여주는 UI 명칭으로 사용할 수 있으며,
 
 ## TXT Ingestion 사용 방법
 
-TXT 준비는 HTTP API가 아닌 내부 Python 함수입니다. 실제 Embedding 호출과 Qdrant 저장은 별도로 연결합니다.
+TXT 준비는 내부 Python 함수이며, 아래 3주차 `index_knowledge()`와 CLI에서 실제 Embedding·Qdrant 저장으로 연결합니다. HTTP ingestion API는 없습니다.
 
 ```text
 prepare_txt_ingestion(path, source=..., splitter=...)
@@ -304,7 +322,7 @@ prepare_txt_ingestion(path, source=..., splitter=...)
   └── chunk_document → list[Chunk]
           ↓
     IngestionResult(document, chunks)
-          ↓ 후속 Embedding 구현
+          ↓ rag.indexing / 실제 E5 Embedding
     실제 Vector 목록 → ensure_collection → upsert_chunks
 ```
 
@@ -402,9 +420,137 @@ Embedding 모델을 선택한 뒤 `.env`에 `QDRANT_VECTOR_SIZE`를 모델의 �
 
 ### 현재 제한과 후속 연결
 
-같은 source와 같은 Chunk 순서로 재적재하면 동일 UUID의 Point가 갱신되므로 중복 Point가 늘어나지 않습니다. 다만 원문 변경·splitter 변경으로 Chunk 수가 줄어들면 이전의 뒤쪽 Point가 남습니다. source 변경도 별도 Document로 처리합니다. **문서 교체 시 잔여 Point 정리, 여러 배치 처리·재시도·병렬화는 아직 제공하지 않습니다.**
+같은 source와 같은 Chunk 순서로 재적재하면 동일 UUID의 Point가 갱신되므로 중복 Point가 늘어나지 않습니다. 다만 원문 변경·splitter 변경으로 Chunk 수가 줄어들면 이전의 뒤쪽 Point가 남습니다. source 변경도 별도 Document로 처리합니다. **문서 교체 시 잔여 Point 정리, Qdrant 적재의 여러 배치 처리·재시도·병렬화는 아직 제공하지 않습니다.**
 
-다음 단계는 NLP splitter 연결, 실제 Embedding 모델 연결, 재색인 정책 결정, Retrieval 구현입니다. PostgreSQL Document 테이블, 업로드 API, Document CRUD, 모델 다운로드·유료 API 호출은 추가하지 않았습니다.
+3주차에서 실제 E5 임베딩과 검색을 연결했습니다. NLP splitter의 실제 전략 연결, 문서 교체·잔여 Point 정리, 검색 품질 실험은 후속 작업입니다. PostgreSQL Document 테이블·업로드 API·Document CRUD·유료 API 호출은 추가하지 않았습니다. 모델 다운로드는 아래의 명시적 `prepare-model` 명령에서만 수행합니다.
+
+## 3주차 실제 Embedding·적재·검색
+
+초기 모델은 [intfloat/multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small/blob/main/README.md)입니다. **CPU 추론만 사용하며 학습·파인튜닝은 하지 않습니다.** PyTorch `2.14.1`, Transformers `5.20.2`, Python `3.12.14`에서 설치·import·추론을 확인했습니다.
+
+고정 리비전은 `614241f622f53c4eeff9890bdc4f31cfecc418b3`이며 tokenizer와 weights 모두 같은 리비전을 사용합니다. 모델은 384차원, attention mask를 반영한 mean pooling, L2 정규화를 사용합니다. 문서는 `passage: `, 질문은 `query: ` 접두사를 **추론 입력에만** 붙입니다. 원문·출처·Qdrant payload는 변하지 않습니다.
+
+### 1. 환경과 모델 준비
+
+아래 명령은 가상환경을 활성화한 **backend** 디렉터리에서 실행합니다. 처음 실행하는 팀원은 위 절차대로 `.env.example`을 `.env`로 복사하세요. 기존 `.env`를 덮어쓰지 말고, E5 설정을 추가하거나 다음 환경변수로 지정합니다.
+
+```bash
+python -m pip install -r requirements.txt
+export QDRANT_COLLECTION_NAME=artificial_soul_e5_small_v1
+export QDRANT_VECTOR_SIZE=384
+export QDRANT_DISTANCE=Cosine
+python -m app.rag.cli prepare-model
+```
+
+이 명령만 Hugging Face에서 필요한 모델 파일을 내려받습니다. 새 리비전의 `main`을 자동 추적하지 않습니다. HTTP 요청·앱 import·시작·Health에서는 다운로드하지 않으며, 첫 실제 검색/적재에서 준비된 로컬 스냅샷만 지연 로드합니다. 모델 파일이 없으면 검색은 안전한 503 응답으로 준비 명령을 안내합니다. CPU 로드·추론은 작업 스레드에서 실행하고, 프로세스 내 공유 모델을 잠금으로 보호합니다.
+
+캐시는 기본 `backend/.cache/huggingface`이며 Git과 Docker 빌드에서 제외합니다. 캐시를 지우면 `prepare-model`을 다시 실행하세요. 이미지에 모델을 복사하지 않으므로 컨테이너에서 사용할 때에는 별도 모델 준비와 쓰기 가능한 캐시 경로/볼륨이 필요합니다.
+
+Windows PowerShell에서는 환경변수 설정을 다음으로 바꿉니다. 나머지 Python 명령은 같습니다.
+
+```powershell
+$env:QDRANT_COLLECTION_NAME = "artificial_soul_e5_small_v1"
+$env:QDRANT_VECTOR_SIZE = "384"
+$env:QDRANT_DISTANCE = "Cosine"
+```
+
+### 2. Qdrant 실행과 샘플 TXT 적재
+
+```bash
+docker compose up -d postgres qdrant
+python -m app.rag.cli index-txt examples/knowledge/university.txt \
+  --source examples/university.txt --category sample \
+  --metadata '{"sample":true}' --splitter lines
+```
+
+`examples/knowledge/university.txt`는 처리 검증용 가상 대학 정보 4줄이며 실제 학교 공지가 아닙니다. `--splitter lines`는 줄바꿈을 이용하는 **샘플 전략**입니다. 위 명령을 반복하면 같은 4개 UUID를 갱신하며 Point 수는 늘어나지 않습니다. CLI 출력의 `processed_chunks`는 처리 수로, 새로 추가된 Point 수와 다릅니다.
+
+NLP의 실제 함수를 연결할 때에는 `--splitter package.module:function`을 전달합니다. 함수는 기존 `Callable[[str], Sequence[str]]` 규약을 지켜야 합니다. `prepare_txt_ingestion(..., splitter=nlp_splitter)`와 `index_knowledge(prepared, client, provider, settings)`를 내부 코드에서 직접 호출해도 됩니다.
+
+적재는 전체 Chunk의 임베딩 개수·차원·유한한 값·0벡터 여부를 검증한 후 기존 `ensure_collection()`·`upsert_chunks()`를 호출합니다. 모델 식별 정보는 컬렉션 metadata의 `artificial_soul_embedding`에 저장하고, Chunk payload는 그대로 유지합니다. 이미 존재하는 식별 정보 없는 컬렉션은 빈 상태라도 자동 인수하지 않습니다. 새 모델 전용 이름으로 적재하세요.
+
+### 3. API 실행과 검색
+
+위와 같은 환경변수가 설정된 터미널에서 실행합니다.
+
+```bash
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+다른 터미널에서 호출하거나 [Swagger](http://127.0.0.1:8000/docs)의 RAG retrieval 항목을 사용합니다.
+
+```bash
+curl -i http://127.0.0.1:8000/api/rag/retrieve \
+  -H 'Content-Type: application/json' \
+  --data '{"question":"장학금 신청 방법을 알려주세요","top_k":3}'
+```
+
+HTTP 200 응답 예시입니다. UUID와 점수는 예시이며 점수는 정답 확률이 아닙니다.
+
+```json
+{
+  "question": "장학금 신청 방법을 알려주세요",
+  "top_k": 3,
+  "results": [
+    {
+      "chunk_id": "11111111-1111-4111-8111-111111111111",
+      "document_id": "22222222-2222-4222-8222-222222222222",
+      "chunk_index": 0,
+      "text": "장학금 신청은 학생지원시스템의 장학 메뉴에서 할 수 있으며 재학 증명서와 성적 증명서를 제출해야 합니다.",
+      "source": "examples/university.txt",
+      "category": "sample",
+      "metadata": {"sample": true},
+      "score": 0.9044
+    }
+  ]
+}
+```
+
+`top_k` 기본값은 5, 범위는 1~20이며 실제 결과가 더 적을 수 있습니다. 질문은 문자열 1~10000자이며 공백뿐인 입력과 정의되지 않은 필드를 거부합니다. Qdrant `query_points()`로 payload를 포함해 검색하고 순서를 유지하며 원시 벡터는 반환하지 않습니다. 임의의 점수 임계값은 적용하지 않습니다. 유효한 빈 컬렉션은 `results: []`이고, 없는 컬렉션은 503입니다. 검색 경로는 컬렉션 생성·Point 적재·모델 다운로드를 하지 않습니다.
+
+| HTTP | 오류 code 또는 상황 |
+| --- | --- |
+| 422 | `VALIDATION_ERROR`, `EMBEDDING_INPUT_INVALID`: 질문·top_k·토큰 길이 오류 |
+| 503 | `EMBEDDING_UNAVAILABLE`: 로컬 모델 미준비 또는 추론 불가 |
+| 503 | `RETRIEVAL_CONFIGURATION_ERROR`: 차원·거리 함수·모델 식별 정보 불일치 |
+| 503 | `COLLECTION_NOT_READY`: 적재할 검색 컬렉션 없음 |
+| 503 | `SEARCH_UNAVAILABLE`: Qdrant 연결·검색 불가 |
+| 504 | `RETRIEVAL_TIMEOUT`: 질문 임베딩/검색 전체 제한 또는 Qdrant 요청 시간초과 |
+| 500 | `RETRIEVAL_DATA_INVALID`, `INTERNAL_ERROR`: 손상된 payload 또는 예상하지 못한 오류 |
+
+오류는 `{"detail":{"code":"...","message":"..."}}` 형식이며 원본 예외·연결 주소·민감 입력을 반환하지 않습니다. 검색 전체 제한은 기본 30초, Qdrant 클라이언트 제한은 10초이며 Health는 기존대로 서비스별 3초입니다.
+
+### 4. 토큰 제한과 NLP 모델 교체
+
+- E5의 최대 입력은 **접두사·특수 토큰을 포함해 512토큰**입니다. 글자 수와 토큰 수는 다릅니다. 조용히 잘라 저장하지 않고 오류를 반환하므로 NLP splitter가 이 한도 안에서 Chunk를 만들도록 해야 합니다. 긴 질문은 HTTP 422입니다.
+- 교체 가능한 경계는 `EmbeddingProvider`의 `embed_documents()`, `embed_query()`, `dimension`, `identity`입니다. `identity`는 모델 ID·고정 리비전·전처리/정규화 버전을 식별합니다.
+- 현재 E5 provider는 이 모델만 지원합니다. 다른 모델명만 설정해서 E5 규칙을 그대로 적용하지 않습니다. NLP 담당이 다른 모델을 선택하면 해당 모델의 접두사·pooling·정규화·차원에 맞는 provider를 구현하고 새 identity를 사용합니다.
+- **모델이나 리비전이 바뀌면 차원이 같더라도 별도 컬렉션에 다시 적재**합니다. 기존 metadata를 덮어써 재사용하지 않습니다. 현재 적재·검색은 Cosine 구성만 지원합니다.
+- 문서 내용 변경으로 Chunk 수가 줄어들 때 이전 뒤쪽 Point를 지우는 재색인 정책은 아직 없습니다. 수동 적재는 한 컬렉션에 한 작업씩 실행하세요. 분산 동시 적재·잠금은 지원하지 않습니다.
+- 검색 API는 로컬 개발용이며 JWT가 없습니다. 운영 공개와 인증 연동은 후속 작업입니다. LLM 답변·Context·Chat 저장·SSE·`POST /api/rag/query`는 아직 구현하지 않았습니다.
+
+### 5. 테스트와 관찰한 결과
+
+```bash
+# 모델 다운로드와 실제 DB/Qdrant 없이 실행
+python -m pytest -q -m 'not integration'
+
+# 준비한 실제 로컬 E5 모델과 실제 Qdrant 사용
+RUN_RAG_INTEGRATION=1 QDRANT_URL=http://127.0.0.1:6333 \
+  python -m pytest -q -s -m rag_integration
+
+# 기존 2주차 Qdrant 적재 테스트까지 함께 실행
+RUN_QDRANT_INTEGRATION=1 RUN_RAG_INTEGRATION=1 \
+  QDRANT_URL=http://127.0.0.1:6333 python -m pytest -q
+```
+
+PowerShell에서는 필요한 실행 플래그를 `$env:RUN_RAG_INTEGRATION = "1"`과 같이 설정하고 `python -m pytest -q -s -m rag_integration`을 실행합니다. 완료 후 `Remove-Item Env:RUN_RAG_INTEGRATION`으로 해제할 수 있습니다.
+
+기본 테스트는 모의 provider·Qdrant와 작은 합성 Tensor로 접두사, padding 제외, 정규화, 512토큰 경계, 전체 입력 검증, 순서·출처·metadata, 안전한 오류, 시간초과, 모델 없이 시작하는 Health와 자원 정리를 검증합니다. 실제 모델 가중치를 다운로드하지 않습니다.
+
+실제 통합 테스트는 고유한 `test_rag_e5_<UUID>` 컬렉션에서 한국어 샘플 4개를 적재·재적재하고 Point 수가 4로 유지되는지, 실제 384차원 벡터와 HTTP 검색의 UUID·원문·출처를 확인합니다. 생성한 테스트 컬렉션만 `finally`에서 삭제하고 삭제 여부도 확인합니다.
+
+고정 모델 리비전으로 실행한 샘플 질문의 Top-3 관찰은 Chunk 0(장학금) 0.9044, Chunk 3(기숙사) 0.8345, Chunk 1(수강신청) 0.8161이었습니다. 이는 파이프라인 연결 확인이며 실제 대학 지식 전반의 검색 품질 평가가 아닙니다. NLP 담당의 평가 질문셋·Top-K·임계값·Chunking 비교가 별도로 필요합니다.
 
 ## Spring 개발자 관점
 
@@ -481,7 +627,7 @@ docker run --rm --name artificial-soul-api \
 
 ## 다음 단계
 
-첨부된 6주 스프린트 방향에 따라 다음 순서로 개발합니다. 1주차 개발환경과 2주차 Document/Chunk 준비·Qdrant 저장 기반은 구현했으며, 2주차 splitter의 실제 전략과 3주차 이후 AI·업무 기능은 후속 연결 대상입니다.
+첨부된 6주 스프린트 방향에 따라 개발합니다. 백엔드는 1~2주차 기반과 3주차 E5 기준 임베딩·적재·검색 API를 구현했습니다. NLP의 실제 splitter·모델 품질 비교는 별도이며, 다음 기능은 4주차 Context·LLM·답변/출처 응답입니다.
 
 | 주차 | Backend 개발 목표 |
 | --- | --- |

@@ -13,7 +13,7 @@ from app.document.schema import Chunk
 def create_qdrant_client(settings: Settings) -> AsyncQdrantClient:
     return AsyncQdrantClient(
         url=str(settings.qdrant_url),
-        timeout=ceil(settings.health_check_timeout_seconds),
+        timeout=ceil(settings.qdrant_request_timeout_seconds),
         # Avoid the constructor's network version check. Versions are pinned,
         # and readiness checks connectivity explicitly when requested.
         check_compatibility=False,
@@ -55,6 +55,13 @@ async def ensure_collection(
 
     # Inspect both new and existing collections without deleting any data.
     collection = await client.get_collection(collection_name=collection_name)
+    validate_collection_config(collection, size, distance)
+
+
+def validate_collection_config(
+    collection: models.CollectionInfo, size: int, distance: models.Distance
+) -> None:
+    """Shared read-only validation for indexing and retrieval."""
     params = collection.config.params
     vectors = params.vectors
     if (
