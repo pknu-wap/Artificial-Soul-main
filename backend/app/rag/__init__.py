@@ -1,1 +1,1 @@
-"""Future embedding, retrieval, context building, and answer orchestration."""
+"""Knowledge embedding, explicit indexing, and retrieval; LLM answers come later."""
